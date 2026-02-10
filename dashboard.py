@@ -1,238 +1,188 @@
 import streamlit as st
 import boto3
-from boto3.dynamodb.conditions import Key
-import pandas as pd
 from datetime import datetime
 import json
-import time
 
-# --- CONFIGURAÇÕES ---
-st.set_page_config(
-    page_title="Sentinel AI - DevSecOps Dashboard",
-    page_icon="🛡️",
-    layout="wide"
-)
+# --- Configurações ---
+st.set_page_config(page_title="Sentinel AI", page_icon="🛡️", layout="wide")
 
-# Configuração da AWS (Certifique-se que seu PC tem credenciais ou use st.secrets)
+# CSS
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] { font-size: 28px; }
+    .stButton>button { border-radius: 5px; height: 2.5em; background-color: #262730; color: white; border: 1px solid #444; }
+    .stButton>button:hover { border-color: #FFD700; color: #FFD700; }
+    .date-text { font-size: 0.85em; color: #aaa; margin-bottom: 5px; }
+    </style>
+    """, unsafe_allow_html=True)
+
 AWS_REGION = "us-east-2"
 DYNAMODB_TABLE = "SentinelMonitor"
 
-# Conexão com DynamoDB
+AWS_SERVICES = {
+    "S3": "S3 (Armazenamento em Nuvem)",
+    "EC2": "EC2 (Servidor Virtual)",
+    "SG": "Security Group (Firewall)",
+    "IAM": "IAM (Gestão de Identidade)",
+    "IAC": "IaC (Código de Infraestrutura)"
+}
+
+# --- Barra Lateral ---
+st.sidebar.title("🛡️ Sentinel AI")
+st.sidebar.caption("Centro de Comando DevSecOps")
+st.sidebar.markdown("---")
+
+st.sidebar.markdown("### 🚦 Status do Sistema")
+col_side1, col_side2 = st.sidebar.columns(2)
+with col_side1:
+    st.markdown("☁️ **Cloud**")
+    st.markdown("🟢 **ONLINE**")
+with col_side2:
+    st.markdown("💻 **CI/CD**")
+    st.markdown("🟢 **ONLINE**")
+
+st.sidebar.markdown("---")
+
+# --- Ingestão de Dadosr ---
 @st.cache_resource
 def get_dynamodb_resource():
     return boto3.resource('dynamodb', region_name=AWS_REGION)
 
-# Função para buscar dados
 def get_data():
-    dynamodb = get_dynamodb_resource()
-    table = dynamodb.Table(DYNAMODB_TABLE)
+    table = get_dynamodb_resource().Table(DYNAMODB_TABLE)
     try:
-        # Pega todos os itens (Scan) - Para produção real, usar Query seria melhor
         response = table.scan()
         items = response.get('Items', [])
-        
-        # Ordena por data (mais recente primeiro)
-        # Tenta converter string para data para ordenar corretamente
         items.sort(key=lambda x: x.get('data_evento', ''), reverse=True)
         return items
-    except Exception as e:
-        st.error(f"Erro ao conectar no DynamoDB: {e}")
+    except:
         return []
 
-# Função para formatar data BR
-def format_date(date_str):
-    try:
-        dt = datetime.strptime(date_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
-        return dt.strftime("%d/%m/%Y %H:%M")
-    except:
-        return date_str
-
-# Função para arquivar alerta (Botão Resolver)
-def archive_alert(item_id):
-    dynamodb = get_dynamodb_resource()
-    table = dynamodb.Table(DYNAMODB_TABLE)
+def update_status(item_id, novo_estado):
+    table = get_dynamodb_resource().Table(DYNAMODB_TABLE)
     try:
         table.update_item(
             Key={'id_recurso': item_id},
             UpdateExpression="set estado_visualizacao = :s",
-            ExpressionAttributeValues={':s': 'ARQUIVADO'}
+            ExpressionAttributeValues={':s': novo_estado}
         )
-        st.success(f"Alerta {item_id} arquivado!")
-        time.sleep(1)
-        st.rerun()
+        return True
     except Exception as e:
-        st.error(f"Erro ao arquivar: {e}")
+        st.error(f"Erro ao atualizar banco: {e}")
+        return False
 
-# --- UI PRINCIPAL ---
+def format_date_br(date_str):
+    try:
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        return dt.strftime("%d/%m/%Y - %H:%M")
+    except:
+        return date_str
 
-st.title("🛡️ Sentinel AI Dashboard")
-st.markdown("### Centro de Comando DevSecOps Integrado")
-st.markdown("---")
+# --- Detalhes ---
+@st.dialog("Relatório Detalhado")
+def show_details(item, is_cloud=False):
+    estado = item.get('estado_visualizacao')
+    st.write(f"**Recurso:** `{item['id_recurso']}`")
+    st.write(f"**Data:** {format_date_br(item.get('data_evento'))}")
+    st.divider()
+    
+    st.markdown("#### 🧠 Análise do Sentinel AI")
+    if estado == 'CONFIRMADO':
+        st.warning("⚠️ Incidente revisado e remediação confirmada.")
+    else:
+        st.error(item.get('risco', 'Risco identificado.'))
+    
+    st.divider()
+    st.markdown("#### 🛠️ Resposta e Ações")
+    st.info(f"**Ação Automática:** {item.get('auto_correcao', 'Monitoramento ativo.')}")
+    
+    if is_cloud and estado != 'CONFIRMADO':
+        st.write("")
+        if st.button("✅ Confirmar Remediação"):
+            if update_status(item['id_recurso'], 'CONFIRMADO'):
+                st.success("Remediação Confirmada! Limpando fila...")
+                st.rerun()
 
-# Sidebar
-st.sidebar.header("Navegação")
-menu = st.sidebar.radio(
-    "Selecione a Visão:",
-    ["🚨 Monitoramento Cloud (Runtime)", "💻 Pipeline CI/CD (Buildtime)", "📂 Histórico Arquivado"]
-)
+    with st.expander("Ver Log JSON"):
+        st.json(item.get('json_analise', '{}'))
 
-st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Atualizar Dados"):
+# --- Interface ---
+menu = st.sidebar.radio("Navegação", ["🚨 Monitoramento Cloud", "💻 Pipeline CI/CD", "📂 Histórico Geral"])
+if st.sidebar.button("🔄 Atualizar Dashboard"):
     st.rerun()
 
-st.sidebar.info(f"Conectado em: {AWS_REGION}")
-
-# Carregar Dados
 all_data = get_data()
 
-# Separar os dados por TIPO
-# Cloud = sg, s3, iam (tudo que não é IAC)
-# Pipeline = IAC
-
-data_cloud = [x for x in all_data if x.get('tipo') != 'IAC']
-data_pipeline = [x for x in all_data if x.get('tipo') == 'IAC']
-
-# --- ABA 1: MONITORAMENTO CLOUD (Runtime) ---
-if menu == "🚨 Monitoramento Cloud (Runtime)":
-    
-    # Filtra apenas os ativos (não arquivados)
-    active_alerts = [x for x in data_cloud if x.get('estado_visualizacao') != 'ARQUIVADO']
-    
-    # KPIs
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Ameaças Ativas", len(active_alerts))
-    
-    high_risks = len([x for x in active_alerts if x.get('gravidade') == 'ALTA'])
-    kpi2.metric("Risco Crítico 🔥", high_risks)
-    
-    auto_fixed = len([x for x in data_cloud if "removida" in str(x.get('auto_correcao', '')).lower()])
-    kpi3.metric("Auto-Corrigidos 🤖", auto_fixed)
-    
-    st.markdown("### 📡 Alertas em Tempo Real")
-    
-    if not active_alerts:
-        st.success("✅ Nenhum alerta de segurança ativo no momento. A nuvem está segura.")
-    else:
-        for item in active_alerts:
-            with st.container():
-                # Cor da borda baseada na gravidade
-                severity = item.get('gravidade', 'MEDIA')
-                emoji = "🔴" if severity == 'ALTA' else "🟠"
-                
-                c1, c2 = st.columns([5, 1])
-                
-                with c1:
-                    st.subheader(f"{emoji} {item.get('risco')} ({item.get('tipo').upper()})")
-                    st.markdown(f"**Recurso:** `{item.get('id_recurso')}`")
-                    st.markdown(f"**Data:** {format_date(item.get('data_evento'))}")
-                    st.markdown(f"**Detalhe:** {item.get('json_analise', '{}')}")
-                    
-                    if item.get('auto_correcao') and item.get('auto_correcao') != "Nenhuma - Monitoramento":
-                        st.info(f"🛠️ **Ação da IA:** {item.get('auto_correcao')}")
-                
-                with c2:
-                    st.write("")
-                    st.write("")
-                    if st.button("Resolver", key=item['id_recurso']):
-                        archive_alert(item['id_recurso'])
-                
-                st.divider()
-
-# --- ABA 2: PIPELINE DEVSECOPS (Buildtime - NOVO) ---
-elif menu == "💻 Pipeline CI/CD (Buildtime)":
-    st.header("💻 Auditoria de Código (GitHub Actions)")
-    st.markdown("Monitoramento preventivo de arquivos de infraestrutura (IaC) antes do deploy.")
-    
-    if not data_pipeline:
-        st.info("Nenhuma execução de pipeline registrada ainda. Dê um Push no GitHub!")
-    else:
-        # Métricas do Pipeline
-        total_scans = len(data_pipeline)
-        falhas = len([x for x in data_pipeline if x.get('status_ia') == 'VULNERAVEL'])
-        sucessos = total_scans - falhas
-        taxa_sucesso = (sucessos / total_scans) * 100 if total_scans > 0 else 0
+def render_cards(data_list, limit=None, is_cloud=False):
+    if not data_list:
+        st.info("Nenhum registro pendente.")
+        return
+    display_data = data_list[:limit] if limit else data_list
+    for item in display_data:
+        tipo = item.get('tipo', 'SCAN').upper()
+        servico = AWS_SERVICES.get(tipo, tipo)
+        estado = item.get('estado_visualizacao')
         
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total de Scans", total_scans)
-        c2.metric("Aprovações ✅", sucessos)
-        c3.metric("Bloqueios de Segurança 🚫", falhas, delta_color="inverse")
-        
-        st.markdown("---")
-        st.markdown("### 📜 Histórico de Scans")
-        
-        # Lista de Scans
-        for item in data_pipeline:
-            is_vuln = item.get('status_ia') == 'VULNERAVEL'
-            
-            # Estilização Visual
-            if is_vuln:
-                status_color = "red"
-                icon = "🚫"
-                status_text = "BLOQUEADO"
-            else:
-                status_color = "green"
-                icon = "✅"
-                status_text = "APROVADO"
-            
-            # Extrair nome do arquivo do ID (PR-timestamp-nomedoarquivo.json)
-            try:
-                nome_arquivo = item.get('id_recurso').split('-')[-1]
-            except:
-                nome_arquivo = item.get('id_recurso')
+        if estado == 'CONFIRMADO':
+            border_color = "#FFD700" 
+            bg_tag = "#443a00"
+            status_txt = "⚠️ CONFIRMADO"
+        elif item.get('status_ia') == 'VULNERAVEL' or item.get('gravidade') == 'ALTA':
+            border_color = "#ff4b4b"
+            bg_tag = "#632020"
+            status_txt = "🚫 ALERTA"
+        else:
+            border_color = "#28a745"
+            bg_tag = "#1b3a1e"
+            status_txt = "✅ SEGURO"
 
-            # Card Expansível
-            with st.expander(f"{icon} [{format_date(item.get('data_evento'))}] {nome_arquivo} -> {status_text}"):
-                
-                col_a, col_b = st.columns(2)
-                
-                with col_a:
-                    st.markdown("#### Detalhes da Análise")
-                    st.markdown(f"**Arquivo:** `{nome_arquivo}`")
-                    st.markdown(f"**Risco Identificado:** {item.get('risco')}")
-                    
-                    if is_vuln:
-                        st.error(f"**Motivo do Bloqueio:** {item.get('detalhe')}")
-                    else:
-                        st.success("O código passou em todas as verificações de segurança.")
-                
-                with col_b:
-                    st.markdown("#### Metadados")
-                    st.text(f"ID Scan: {item.get('id_recurso')}")
-                    st.text(f"Origem: GitHub Actions")
-                    
-                    # Tenta mostrar o JSON da IA formatado
-                    try:
-                        analise_json = json.loads(item.get('json_analise'))
-                        st.json(analise_json)
-                    except:
-                        st.text("Dados brutos indisponíveis.")
+        with st.container():
+            st.markdown(f"""
+                <div style="border-left: 6px solid {border_color}; background-color: #262730; padding: 15px; border-radius: 8px; margin-bottom: 10px;">
+                    <div class="date-text">{format_date_br(item.get('data_evento'))}</div>
+                    <div style="margin-bottom: 8px;">
+                        <span style="background-color: {bg_tag}; padding: 2px 8px; border-radius: 4px; font-size: 0.7em; font-weight: bold;">{status_txt}</span>
+                        <strong style="margin-left: 5px;">{servico}</strong>
+                    </div>
+                    <div style="font-size: 0.9em; color: #ddd; margin-bottom: 10px;">
+                        ID: <code>{item.get('id_recurso')}</code>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"🔍 Ver Detalhes", key=f"btn_{item['id_recurso']}_{item.get('data_evento', '')}"):
+                show_details(item, is_cloud=is_cloud)
+            st.markdown("<br>", unsafe_allow_html=True)
 
-# --- ABA 3: HISTÓRICO (Arquivados) ---
-elif menu == "📂 Histórico Arquivado":
-    st.header("📂 Histórico de Incidentes Resolvidos")
+# --- Abas ---
+if menu == "🚨 Monitoramento Cloud":
+    st.header("🚨 Monitoramento Cloud (Pendentes)")
     
-    archived_alerts = [x for x in data_cloud if x.get('estado_visualizacao') == 'ARQUIVADO']
+    # FILTRO: Apenas o que NÃO foi confirmado e NÃO é IAC
+    active_cloud = [x for x in all_data if x.get('tipo') != 'IAC' and x.get('estado_visualizacao') != 'CONFIRMADO']
     
-    if not archived_alerts:
-        st.info("Nenhum alerta arquivado.")
-    else:
-        # Transforma em DataFrame para tabela bonita
-        df = pd.DataFrame(archived_alerts)
-        
-        # Seleciona colunas úteis
-        cols_to_show = ['data_evento', 'tipo', 'risco', 'id_recurso', 'auto_correcao']
-        # Garante que as colunas existem (para evitar erro se o json for antigo)
-        for col in cols_to_show:
-            if col not in df.columns:
-                df[col] = '-'
-                
-        # Renomeia para ficar bonito na tela
-        df = df[cols_to_show].rename(columns={
-            'data_evento': 'Data',
-            'tipo': 'Tipo',
-            'risco': 'Risco',
-            'id_recurso': 'Recurso',
-            'auto_correcao': 'Ação Tomada'
-        })
-        
-        st.dataframe(df, use_container_width=True)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Ameaças Ativas", len(active_cloud))
+    k2.metric("Críticos 🔥", len([x for x in active_cloud if x.get('gravidade') == 'ALTA']))
+    k3.metric("Auto-Remediados (IA) 🤖", len([x for x in all_data if x.get('auto_correcao') and 'removida' in str(x.get('auto_correcao')).lower()]))
+    k4.metric("Validações Humanas ✅", len([x for x in all_data if x.get('estado_visualizacao') == 'CONFIRMADO']))
+    
+    st.markdown("---")
+    render_cards(active_cloud, limit=5, is_cloud=True)
+
+elif menu == "💻 Pipeline CI/CD":
+    st.header("💻 Pipeline CI/CD (Atividade Recente)")
+    pipe = [x for x in all_data if x.get('tipo') == 'IAC']
+    total = len(pipe)
+    reprovados = len([x for x in pipe if x.get('status_ia') == 'VULNERAVEL'])
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Commits Analisados", total)
+    c2.metric("Aprovados ✅", total - reprovados)
+    c3.metric("Bloqueados 🚫", reprovados, delta=reprovados * -1, delta_color="inverse")
+    st.markdown("---")
+    render_cards(pipe, limit=5)
+
+elif menu == "📂 Histórico Geral":
+    st.header("📂 Histórico Geral de Segurança")
+    st.columns(1)[0].metric("Total de Eventos Processados", len(all_data))
+    st.markdown("---")
+    render_cards(all_data)
