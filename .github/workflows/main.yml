@@ -26,7 +26,8 @@ jobs:
 
       # 4. Roda o Sentinel Scan
       # O segredo GOOGLE_API_KEY é injetado como variável de ambiente
-      - name: 🔍 Analisar Infraestrutura com IA
+      - name: 🛡️ Sentinel AI - Scan Automático (Todos os Arquivos)
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: python sentinel_scan.py infra_vulneravel.json
+        # O script agora procura sozinho todos os .json
+        run: python sentinel_scan.py
