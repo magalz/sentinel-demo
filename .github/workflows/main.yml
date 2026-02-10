@@ -1,6 +1,6 @@
-name: 🛡️ Sentinel AI - Security Scan
+name: 🛡️ Sentinel AI - DevSecOps Pipeline
 
-# Quando rodar? Sempre que alguém der Push ou abrir um Pull Request
+# Gatilho: Roda sempre que houver um Push ou Pull Request
 on: [push, pull_request]
 
 jobs:
@@ -10,24 +10,26 @@ jobs:
       contents: read
       
     steps:
-      # 1. Baixa o código do repositório
+      # 1. Baixa o código do repositório para a máquina virtual
       - name: Checkout do Código
         uses: actions/checkout@v3
 
-      # 2. Prepara o Python
-      - name: Instalar Python
+      # 2. Prepara o ambiente Python
+      - name: Configurar Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3. Instala biblioteca de requisições
+      # 3. Instala as bibliotecas necessárias (AQUI ESTAVA O ERRO)
       - name: Instalar Dependências
-        run: pip install requests
+        run: pip install requests boto3
 
-      # 4. Roda o Sentinel Scan
-      # O segredo GOOGLE_API_KEY é injetado como variável de ambiente
-      - name: 🛡️ Sentinel AI - Scan Automático (Todos os Arquivos)
+      # 4. Roda o Scanner de Segurança (Sentinel AI)
+      # Injetamos as chaves secretas como variáveis de ambiente
+      - name: 🛡️ Executar Sentinel Scan & Report
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        # O script agora procura sozinho todos os .json
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }} # Ex: us-east-2
         run: python sentinel_scan.py
