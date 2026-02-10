@@ -3,42 +3,66 @@ import sys
 import os
 import glob
 import requests
+import boto3
+from datetime import datetime
 
 # --- CONFIGURAÇÃO ---
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-2')
+DYNAMODB_TABLE = 'SentinelMonitor' # Nome da sua tabela
+
+# Conexão com DynamoDB (Usa as credenciais do ambiente automaticamente)
+try:
+    dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+    table = dynamodb.Table(DYNAMODB_TABLE)
+except Exception as e:
+    print(f"⚠️ Aviso: Não foi possível conectar ao DynamoDB: {e}")
+    table = None
+
+def save_to_dashboard(filename, status, risco, detalhe):
+    """Salva o resultado do scan no DynamoDB para aparecer no Dashboard"""
+    if not table: return
+
+    try:
+        # Cria um ID único para cada execução (timestamp + arquivo)
+        run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+        
+        item = {
+            'id_recurso': f"PR-{run_id}-{filename}", # ID Único
+            'data_evento': str(datetime.now()),
+            'tipo': 'IAC', # Importante para filtrar no dashboard
+            'status_ia': 'VULNERAVEL' if status == 'REPROVADO' else 'SEGURO',
+            'risco': risco if risco else "Nenhum risco detectado",
+            'detalhe': detalhe if detalhe else "Arquivo aprovado na análise estática.",
+            'usuario': 'GitHub Actions CI/CD',
+            'json_analise': json.dumps({'status': status, 'file': filename})
+        }
+        table.put_item(Item=item)
+        print(f"💾 Resultado de '{filename}' salvo no Dashboard.")
+    except Exception as e:
+        print(f"❌ Erro ao salvar no banco: {e}")
 
 def analyze_iac(file_path):
     print(f"\n🔍 Sentinel AI: Analisando '{file_path}'...")
     
-    # 1. Tenta ler o arquivo JSON
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             iac_data = json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"❌ [ERRO SINTAXE] O arquivo '{file_path}' não é um JSON válido.")
-        print(f"   Detalhe: {e}")
-        return {"status": "ERRO_LEITURA", "risco": "JSON Malformado (Syntax Error)"}
     except Exception as e:
-        print(f"❌ [ERRO LEITURA] Falha ao abrir arquivo: {e}")
-        return {"status": "ERRO_LEITURA", "risco": "Arquivo Corrompido"}
+        return {"status": "ERRO_LEITURA", "risco": f"Erro ao ler arquivo: {e}"}
 
-    # 2. Prompt Otimizado
     prompt = f"""
-    Atue como Auditor DevSecOps. Analise este arquivo de Infraestrutura (Terraform/CloudFormation/JSON).
+    Atue como Auditor DevSecOps. Analise este IaC.
+    Riscos Críticos: SG 0.0.0.0/0 (SSH/RDP), S3 Público, IAM Admin (*).
     
-    Identifique riscos CRÍTICOS que impediriam o deploy:
-    1. Security Groups com 'cidr_blocks': ['0.0.0.0/0'] em portas 22 (SSH) ou 3389 (RDP).
-    2. Buckets S3 com 'acl': 'public-read' ou policies abertas para o mundo.
-    3. IAM Roles com 'Action': '*' e 'Resource': '*' (Admin total).
+    ARQUIVO: {json.dumps(iac_data, default=str)}
 
-    ARQUIVO IAC: {json.dumps(iac_data, default=str)}
-
-    Responda APENAS neste JSON:
+    Responda JSON:
     {{
         "status": "APROVADO" ou "REPROVADO",
-        "risco": "Titulo curto (ou null se seguro)",
+        "risco": "Titulo curto",
         "detalhe": "Explicação curta",
-        "correcao": "O que mudar no código"
+        "correcao": "Sugestão"
     }}
     """
     
@@ -48,64 +72,40 @@ def analyze_iac(file_path):
     
     try:
         response = requests.post(url, headers=headers, json=body)
-        if response.status_code != 200:
-            print(f"❌ Erro API Gemini: {response.text}")
-            return {"status": "ERRO_API", "risco": "Falha na Verificação IA"}
-            
-        result = response.json()
-        text_resp = result['candidates'][0]['content']['parts'][0]['text']
-        text_resp = text_resp.replace("```json", "").replace("```", "").strip()
+        if response.status_code != 200: return {"status": "ERRO_API"}
         
-        return json.loads(text_resp)
+        text = response.json()['candidates'][0]['content']['parts'][0]['text']
+        clean_text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(clean_text)
+    except:
+        return {"status": "ERRO_GERAL"}
 
-    except Exception as e:
-        print(f"❌ Falha na análise: {e}")
-        return {"status": "ERRO_GERAL", "risco": "Erro Interno do Scanner"}
-
-# --- LOOP PRINCIPAL ---
+# --- MAIN ---
 if __name__ == "__main__":
-    # Procura todos os JSONs na pasta
-    files_to_scan = glob.glob("*.json")
+    files = glob.glob("*.json")
+    files = [f for f in files if f not in ["package.json", "tsconfig.json"]]
     
-    # Filtra arquivos de configuração do próprio projeto (se houver)
-    files_to_scan = [f for f in files_to_scan if f not in ["package.json", "tsconfig.json"]]
+    if not files: sys.exit(0)
 
-    if not files_to_scan:
-        print("⚠️ Nenhum arquivo de infraestrutura (.json) encontrado.")
-        sys.exit(0)
-
-    print(f"📂 Arquivos encontrados: {len(files_to_scan)}")
+    fails = 0
     
-    arquivos_com_problema = 0
-    
-    for file_name in files_to_scan:
-        resultado = analyze_iac(file_name)
-        status = resultado.get('status')
+    for file_name in files:
+        res = analyze_iac(file_name)
+        status = res.get('status', 'ERRO')
+        risco = res.get('risco')
+        detalhe = res.get('detalhe')
         
-        # LÓGICA DE BLOQUEIO RIGOROSA
+        # Salva no Banco (Seja Verde ou Vermelho)
+        save_to_dashboard(file_name, status, risco, detalhe)
+
         if status == 'REPROVADO':
-            print(f"🚫 [VULNERÁVEL] {file_name}")
-            print(f"   Risco: {resultado.get('risco')}")
-            print(f"   Correção: {resultado.get('correcao')}")
-            arquivos_com_problema += 1
-            
-        elif status in ['ERRO_LEITURA', 'ERRO_API', 'ERRO_GERAL']:
-            print(f"🚫 [ERRO CRÍTICO] {file_name}")
-            print(f"   Motivo: {resultado.get('risco')}")
-            print("   Ação: Corrija o arquivo antes do deploy.")
-            arquivos_com_problema += 1
-            
+            print(f"🚫 [FALHA] {file_name} - {risco}")
+            fails += 1
         elif status == 'APROVADO':
-            print(f"✅ [SEGURO] {file_name}")
-        
+            print(f"✅ [OK] {file_name}")
         else:
-            print(f"⚠️ [DESCONHECIDO] {file_name} - Status inválido da IA.")
-            arquivos_com_problema += 1
+            print(f"⚠️ [ERRO] {file_name}")
+            fails += 1
 
-    print("\n" + "="*40)
-    if arquivos_com_problema > 0:
-        print(f"❌ BLOQUEIO: {arquivos_com_problema} arquivo(s) impedem o deploy.")
-        sys.exit(1) # Código de Erro (Quebra o GitHub Actions)
-    else:
-        print("✅ SUCESSO: Todos os arquivos estão válidos e seguros.")
-        sys.exit(0) # Sucesso
+    if fails > 0: sys.exit(1)
+    else: sys.exit(0)
