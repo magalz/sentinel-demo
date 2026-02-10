@@ -1,0 +1,63 @@
+{
+  "resource": {
+    "aws_security_group": {
+      "app_server_sg": {
+        "name": "app-server-sg-production",
+        "description": "Security Group para Servidor de Aplicacao",
+        "ingress": [
+          {
+            "description": "Acesso HTTPS Publico (Permitido)",
+            "from_port": 443,
+            "to_port": 443,
+            "protocol": "tcp",
+            "cidr_blocks": [
+              "0.0.0.0/0"
+            ]
+          },
+          {
+            "description": "Acesso SSH Restrito a VPN Corporativa",
+            "from_port": 22,
+            "to_port": 22,
+            "protocol": "tcp",
+            "cidr_blocks": [
+              "203.0.113.50/32"
+            ]
+          }
+        ],
+        "egress": [
+          {
+            "from_port": 0,
+            "to_port": 0,
+            "protocol": "-1",
+            "cidr_blocks": [
+              "0.0.0.0/0"
+            ]
+          }
+        ]
+      }
+    },
+    "aws_s3_bucket": {
+      "dados_confidenciais": {
+        "bucket": "financeiro-backup-2026",
+        "acl": "private",
+        "versioning": {
+          "enabled": true
+        },
+        "server_side_encryption_configuration": {
+          "rule": {
+            "apply_server_side_encryption_by_default": {
+              "sse_algorithm": "AES256"
+            }
+          }
+        }
+      }
+    },
+    "aws_iam_role_policy": {
+      "leitura_apenas_bucket": {
+        "name": "S3ReadOnlyPolicy",
+        "role": "AppServerRole",
+        "policy": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": [\"s3:GetObject\", \"s3:ListBucket\"], \"Resource\": [\"arn:aws:s3:::financeiro-backup-2026/*\"]}]}"
+      }
+    }
+  }
+}
