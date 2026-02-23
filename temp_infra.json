@@ -1,0 +1,33 @@
+{
+  "resources": [
+    {
+      "id": "s3-bucket-dados-clientes-2025",
+      "type": "aws_s3_bucket",
+      "status": "critical",
+      "config": {
+        "acl": "public-read",
+        "encryption": "disabled",
+        "versioning": false
+      }
+    },
+    {
+      "id": "sg-db-production",
+      "type": "aws_security_group",
+      "status": "high",
+      "config": {
+        "inbound_rules": [
+          {
+            "port": 22,
+            "source": "0.0.0.0/0",
+            "description": "SSH aberto para o mundo"
+          },
+          {
+            "port": 3389,
+            "source": "0.0.0.0/0",
+            "description": "RDP aberto"
+          }
+        ]
+      }
+    }
+  ]
+}
