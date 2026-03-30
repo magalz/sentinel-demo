@@ -6,6 +6,14 @@ import requests
 import boto3
 from datetime import datetime
 
+# Carrega var de ambiente localmente. 
+# No GitHub Actions (CI/CD), as vars vêm do Secrets e o dotenv não é necessário.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # --- CONFIGURAÇÃO ---
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-2')

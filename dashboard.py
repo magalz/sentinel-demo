@@ -2,9 +2,16 @@ import streamlit as st
 import boto3
 from datetime import datetime
 import json
+from dotenv import load_dotenv
+from streamlit_autorefresh import st_autorefresh
+
+load_dotenv()
 
 # --- Configurações ---
 st.set_page_config(page_title="Sentinel AI", page_icon="🛡️", layout="wide")
+
+# Atualização Automática Assíncrona a cada 10 segundos
+st_autorefresh(interval=10000, key="data_refresh")
 
 # CSS
 st.markdown("""
@@ -163,7 +170,7 @@ if menu == "🚨 Monitoramento Cloud":
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Ameaças Ativas", len(active_cloud))
     k2.metric("Críticos 🔥", len([x for x in active_cloud if x.get('gravidade') == 'ALTA']))
-    k3.metric("Auto-Remediados (IA) 🤖", len([x for x in all_data if x.get('auto_correcao') and 'removida' in str(x.get('auto_correcao')).lower()]))
+    k3.metric("Auto-Remediados (IA) 🤖", len([x for x in all_data if x.get('auto_correcao') and 'remediado' in str(x.get('auto_correcao')).lower()]))
     k4.metric("Validações Humanas ✅", len([x for x in all_data if x.get('estado_visualizacao') == 'CONFIRMADO']))
     
     st.markdown("---")
