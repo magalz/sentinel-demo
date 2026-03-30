@@ -1,0 +1,17 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Resources": {
+    "VulnerableBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": "public-unencrypted-logs-bucket",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": false,
+          "BlockPublicPolicy": false,
+          "IgnorePublicAcls": false,
+          "RestrictPublicBuckets": false
+        }
+      }
+    }
+  }
+}
