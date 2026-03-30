@@ -1,0 +1,14 @@
+# Credenciais e variáveis de ambiente - NUNCA commitar
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/

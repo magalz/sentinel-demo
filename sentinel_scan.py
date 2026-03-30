@@ -5,6 +5,9 @@ import glob
 import requests
 import boto3
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- CONFIGURAÇÃO ---
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')

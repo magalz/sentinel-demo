@@ -1,4 +1,4 @@
-google-generativeai
+boto3
+requests
 python-dotenv
 streamlit
-bandit
